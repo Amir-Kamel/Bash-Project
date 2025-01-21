@@ -4,79 +4,80 @@
 BASE_DIR="/home/amir/Documents/BashTasks/BashFinalProjectDBMS"
 
 # Path to the FinalTable script
-FINAL_TABLE_SCRIPT="/home/amir/Documents/BashTasks/BashFinalProjectDBMS/FinalTable"
+FINAL_TABLE_SCRIPT="$BASE_DIR/FinalTable"  # Make sure the path is correct
 
 # Check if the database directory exists or not
 if [[ ! -e "$BASE_DIR" ]]; then
     mkdir -p "$BASE_DIR"
-    echo "Database directory created."
+    zenity --info --text="Database directory created."
 fi
 
 cd "$BASE_DIR" || exit
-echo "Connected to database directory."
-
-
+zenity --info --text="Connected to database directory. " 
 
 # Main menu
 while true; do
-    echo "Main Menu:"
-    echo "1) Create Database"
-    echo "2) List Databases"
-    echo "3) Connect To Database"
-    echo "4) Drop Database"
-    echo "5) Exit"
-
-    read -p "Enter your choice [1-5]: " choice
+    choice=$(zenity --list --title="Main Menu" --radiolist \
+    --column="Select" --column="Option" \
+    TRUE "Create Database" \
+    FALSE "List Databases" \
+    FALSE "Connect To Database" \
+    FALSE "Drop Database" \
+    FALSE "Exit" --width=700 --height=500)
 
     case $choice in
-    1) # Create database
-        read -p "Please enter database name: " DBName
+    "Create Database") # Create database
+        DBName=$(zenity --entry --text="Please enter database name:")
         if [[ -z $DBName || ! $DBName =~ ^[a-zA-Z][a-zA-Z0-9_]*[a-zA-Z0-9]$ ]]; then
-            echo "Invalid database name. Use only letters, numbers, and underscores. Must start with a letter and not end with an underscore."
+            zenity --error --text="Invalid database name. Use only letters, numbers, and underscores. Must start with a letter and not end with an underscore."
         elif [[ -e $DBName ]]; then
-            echo "Database '$DBName' already exists."
+            zenity --error --text="Database '$DBName' already exists."
         else
             mkdir "$DBName"
-            echo "Database '$DBName' created successfully."
+            zenity --info --text="Database '$DBName' created successfully."
         fi
         ;;
-    2) # Print and list all databases
-        echo "Databases:"
-        ls -d */ || echo "No databases found."
+    "List Databases") # Print and list all databases
+        databases=$(ls -d */)
+        if [[ -z $databases ]]; then
+            zenity --info --text="No databases found."
+        else
+            zenity --info --text="Databases:\n$databases"
+        fi
         ;;
-    3) # Connect to database
-        read -p "Please enter database name: " DBName
+    "Connect To Database") # Connect to database
+        DBName=$(zenity --entry --text="Please enter database name:")
         if [[ -z $DBName || ! -d $DBName ]]; then
-            echo "Database '$DBName' does not exist."
+            zenity --error --text="Database '$DBName' does not exist."
         else
             cd "$DBName" || exit
-            echo "Connected to database '$DBName'."
+            zenity --info --text="Connected to database '$DBName'."
 
             # Source the table operations script
             if [[ -f $FINAL_TABLE_SCRIPT ]]; then
                 source "$FINAL_TABLE_SCRIPT"
             else
-                echo "Error: FinalTable script not found at $FINAL_TABLE_SCRIPT"
+                zenity --error --text="Error: FinalTable script not found at $FINAL_TABLE_SCRIPT"
             fi
 
             cd "$BASE_DIR" || exit
         fi
         ;;
-    4) # Drop database
-        read -p "Enter database name to drop: " DBName
+    "Drop Database") # Drop database
+        DBName=$(zenity --entry --text="Enter database name to drop:")
         if [[ -z $DBName || ! -d $DBName ]]; then
-            echo "Database '$DBName' does not exist."
+            zenity --error --text="Database '$DBName' does not exist."
         else
             rm -r "$DBName"
-            echo "Database '$DBName' dropped successfully."
+            zenity --info --text="Database '$DBName' dropped successfully."
         fi
         ;;
-    5) # Exit
-        echo "Exiting the program."
+    "Exit") # Exit
+        zenity --info --text="Exiting the program."
         break
         ;;
     *) # Invalid Option
-        echo "Invalid choice. Please select a number between 1 and 5."
+        zenity --error --text="Invalid choice. Please select a valid option."
         ;;
     esac
 done
