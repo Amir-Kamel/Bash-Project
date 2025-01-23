@@ -109,8 +109,6 @@ do
 					rm -r "$DBName"
 					zenity --notification --text="Database '$DBName' dropped successfully."
 					break
-				else
-					break
 				fi
 			fi
 		done
