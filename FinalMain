@@ -1,84 +1,189 @@
-#!/bin/bash
+#!/usr/bin/bash
+shopt -s extglob
 
 # Save directory path
-BASE_DIR="/home/amir/Documents/BashTasks/BashFinalProjectDBMS"
+BASE_DIR="$HOME/Desktop/Full_Stack_Python/Bash_Project/Bash-Project"
 
 # Path to the FinalTable script
 FINAL_TABLE_SCRIPT="$BASE_DIR/FinalTable"  # Make sure the path is correct
 
 # Check if the database directory exists or not
-if [[ ! -e "$BASE_DIR" ]]; then
-    mkdir -p "$BASE_DIR"
-    zenity --info --text="Database directory created."
+if [[ ! -e "$BASE_DIR/Databases" ]]
+then
+	mkdir  "$BASE_DIR/Databases"
+	cd "$BASE_DIR/Databases" || exit
+	zenity --notification --text="Database directory created."
+else
+	cd "$BASE_DIR/Databases" || exit
+	zenity --notification --text="Connected to database directory. " 
 fi
-
-cd "$BASE_DIR" || exit
-zenity --info --text="Connected to database directory. " 
-
 # Main menu
-while true; do
-    choice=$(zenity --list --title="Main Menu" --radiolist \
-    --column="Select" --column="Option" \
-    TRUE "Create Database" \
-    FALSE "List Databases" \
-    FALSE "Connect To Database" \
-    FALSE "Drop Database" \
-    FALSE "Exit" --width=700 --height=500)
+while true
+do
+	choice=$(zenity --list --title="Main Menu"  --radiolist \
+	--column="Select" --column="Option" \
+	TRUE "Create Database" \
+	FALSE "List Databases" \
+	FALSE "Connect To Database" \
+	FALSE "Drop Database"  --width=700 --height=500)
 
-    case $choice in
-    "Create Database") # Create database
-        DBName=$(zenity --entry --text="Please enter database name:")
-        if [[ -z $DBName || ! $DBName =~ ^[a-zA-Z][a-zA-Z0-9_]*[a-zA-Z0-9]$ ]]; then
-            zenity --error --text="Invalid database name. Use only letters, numbers, and underscores. Must start with a letter and not end with an underscore."
-        elif [[ -e $DBName ]]; then
-            zenity --error --text="Database '$DBName' already exists."
-        else
-            mkdir "$DBName"
-            zenity --info --text="Database '$DBName' created successfully."
-        fi
-        ;;
-    "List Databases") # Print and list all databases
-        databases=$(ls -d */)
-        if [[ -z $databases ]]; then
-            zenity --info --text="No databases found."
-        else
-            zenity --info --text="Databases:\n$databases"
-        fi
-        ;;
-    "Connect To Database") # Connect to database
-        DBName=$(zenity --entry --text="Please enter database name:")
-        if [[ -z $DBName || ! -d $DBName ]]; then
-            zenity --error --text="Database '$DBName' does not exist."
-        else
-            cd "$DBName" || exit
-            zenity --info --text="Connected to database '$DBName'."
+	case $choice in
+	"Create Database") # Create database
+		while true 
+		do
+			DBName=$(zenity --entry --title="Create New Database" --text="Please enter database name:")
+			if [[ $? == "1" ]] # In case user change his mind or select the wrong option
+			then 
+				break
+			elif [[ -z $DBName || ! $DBName =~ ^[a-zA-Z][a-zA-Z0-9_]*[a-zA-Z0-9]$ ]] 	
+			then
+				zenity --error --text="Invalid database name. Use only letters, numbers, and underscores. Must start with a letter and not end with an underscore."
+			elif [[ -e $DBName ]]
+			then
+				zenity --error --text="Database '$DBName' already exists."
+			else
+				mkdir "$DBName"
+				zenity --info --text="Database '$DBName' created successfully."
+				break
+			fi
+		done
+		;;
+	"List Databases") # Print and list all databases
+		# make sure that i am in the Databases directory 
+		cd "$BASE_DIR/Databases"
+		databases=$(ls -l | grep "^d" | awk '{print $9}' )
+		if [[ -z $databases ]]
+		then
+			zenity --info --text="No databases found."
+		else
+			zenity --info --text="Available Databases:\n$databases"
+		fi
+		
+		;;
+	"Connect To Database") # Connect to database
+		# make sure that i am in the Databases directory 
+		cd "$BASE_DIR/Databases"
+		databases=$(ls -l | grep "^d" | awk '{print $9}' )
+		if [[ -z $databases ]]
+		then
+			zenity --info --text="No databases found."
+		else
+			# Get directories into an array (excludes hidden directories)
+			mapfile -t db_array < <(find . -maxdepth 1 -type d -printf '%f\n' | grep -v "^\.")
 
-            # Source the table operations script
-            if [[ -f $FINAL_TABLE_SCRIPT ]]; then
-                source "$FINAL_TABLE_SCRIPT"
-            else
-                zenity --error --text="Error: FinalTable script not found at $FINAL_TABLE_SCRIPT"
-            fi
+			# Build Zenity arguments with radio buttons (mark the first item as selected)
+			# Get the array length
+			array_length=${#db_array[@]}
+			
 
-            cd "$BASE_DIR" || exit
-        fi
-        ;;
-    "Drop Database") # Drop database
-        DBName=$(zenity --entry --text="Enter database name to drop:")
-        if [[ -z $DBName || ! -d $DBName ]]; then
-            zenity --error --text="Database '$DBName' does not exist."
-        else
-            rm -r "$DBName"
-            zenity --info --text="Database '$DBName' dropped successfully."
-        fi
-        ;;
-    "Exit") # Exit
-        zenity --info --text="Exiting the program."
-        break
-        ;;
-    *) # Invalid Option
-        zenity --error --text="Invalid choice. Please select a valid option."
-        ;;
-    esac
+
+			# Build Zenity arguments with radio buttons
+			zenity_args=()
+			for ((index=0; index < array_length; index++))
+			do
+				if [[ $index -eq 0 ]]; then
+					zenity_args+=(TRUE "${db_array[index]}")  # First item selected by default
+				else
+					zenity_args+=(FALSE "${db_array[index]}")  # Others unselected
+				fi
+			done
+			
+
+
+			# Show the radio button dialog
+			DBName=$(zenity --list --title="Select a database" --radiolist \
+			  --text="Choose a database:" \
+			  --column="Select" \
+			  --column="Database Name" \
+			  --cancel-label="Back to Main Menu" \
+			  "${zenity_args[@]}")
+			
+			# Capture the exit code of Zenity
+			zenity_exit_code=$?
+			if [[ $zenity_exit_code == "0" ]] #if user select a database and press on 'ok' button
+			then
+				cd "$DBName" || exit
+				zenity --notification --text="Connected to database '$DBName' successfully!"
+
+				# Source the table operations script
+				if [[ -f $FINAL_TABLE_SCRIPT ]]
+				then
+					source "$FINAL_TABLE_SCRIPT" #to execute it in the same shell 
+				else
+					zenity --error --text="Error: FinalTable script not found at $FINAL_TABLE_SCRIPT"
+				fi
+
+				cd "$BASE_DIR" || exit
+			fi
+		fi
+		;;
+	"Drop Database")
+		# make sure that i am in the Databases directory 
+		cd "$BASE_DIR/Databases"
+		while true
+		do
+			databases=$(ls -l | grep "^d" | awk '{print $9}' )
+		if [[ -z $databases ]]
+		then
+			zenity --info --text="No databases found."
+		else
+			# Get directories into an array (excludes hidden directories)
+			mapfile -t db_array < <(find . -maxdepth 1 -type d -printf '%f\n' | grep -v "^\.")
+
+			# Build Zenity arguments with radio buttons (mark the first item as selected)
+			# Get the array length
+			array_length=${#db_array[@]}
+
+			# Build Zenity arguments with radio buttons
+			zenity_args=()
+			for ((index=0; index < array_length; index++))
+			do
+				if [[ $index -eq 0 ]]; then
+					zenity_args+=(TRUE "${db_array[index]}")  # First item selected by default
+				else
+					zenity_args+=(FALSE "${db_array[index]}")  # Others unselected
+				fi
+			done
+
+			# Show the radio button dialog
+			DBName=$(zenity --list --title="Select a database" --radiolist \
+			  --text="Choose a database:" \
+			  --column="Select" \
+			  --column="Database Name" \
+			  --cancel-label="Back to Main Menu" \
+			  "${zenity_args[@]}")
+			
+			# Capture the exit code of Zenity
+			zenity_exit_code=$?
+			if [[ $zenity_exit_code == "0" ]] #if user select a database and press on 'ok' button
+			then
+					zenity --question --title="Drop Confirmation" --text="Are you sure you want to permanently delete the database '$DBName'? This action cannot be undone."
+					user_answer=$?
+					if [[ $user_answer == "0" ]]
+					then
+						rm -r "$DBName"
+						zenity --notification --text="Database '$DBName' dropped successfully."
+						break
+					fi
+				else
+					break
+				fi
+			fi
+		done
+		;;
+	
+	*) # In case user click on cancel or close button 
+		zenity --question --title="Exit Confirmation" --text="Are you sure you want to exit the program?"
+		user_answer=$?
+		if [[ $user_answer == "0" ]]
+		then
+			zenity --notification --text="The program has been exited successfully!"
+			break
+		else
+			zenity --notification --text="Exit operation canceled. You can continue using the program."
+			continue
+		fi
+
+	esac
 done
 
