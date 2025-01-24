@@ -8,6 +8,10 @@ while true; do
 	TRUE "Create Table" \
 	FALSE "List Tables" \
 	FALSE "Drop Table" \
+	FALSE "Insert into Table" \
+	FALSE "Select From Table" \
+	FALSE "Delete From Table" \
+	FALSE "Update Table" \
 	--cancel-label="Back to Main Menu" --width=700 --height=500)
 	
 	# Capture the exit code of Zenity
