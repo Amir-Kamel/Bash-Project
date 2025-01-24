@@ -240,6 +240,106 @@ while true; do
 		    fi
 		    ;;
 
+		"Select From Table") # Select From Table
+		    tables=$(ls -1 | grep -v "^\.")
+		    if [[ -z $tables ]]; then
+			zenity --info --text="No tables found."
+		    else
+			# Get files into an array (excludes hidden files)
+			mapfile -t tables_array < <(find . -maxdepth 1 -type f -printf '%f\n' | grep -v "^\.")
+			# Build Zenity arguments with radio buttons (mark the first item as selected)
+			array_length=${#tables_array[@]}
+			zenity_args=()
+			for ((index=0; index < array_length; index++))
+			do
+			    if [[ $index -eq 0 ]]; then
+				zenity_args+=(TRUE "${tables_array[index]}")  # First item selected by default
+			    else
+				zenity_args+=(FALSE "${tables_array[index]}")  # Others unselected
+			    fi
+			done
+
+			# Show the radio button dialog
+			TBName=$(zenity --list --title="Insert into Table" --radiolist \
+			  --text="Choose a table:" \
+			  --column="Select" \
+			  --column="Table Name" \
+			  --cancel-label="Back to Table Operation Menu" \
+			  "${zenity_args[@]}")
+
+			zenity_exit_code=$?
+			if [[ $zenity_exit_code == "0" ]]; then
+			    if [[ ! -f .$TBName-metadata ]]; then
+				zenity --error --text="Metadata file for table '$TBName' not found."
+				continue
+			    fi
+
+			    # Extract column names from metadata
+			    columns=()
+			    while IFS=":" read -r colName colType colAttr; do
+				columns+=("$colName")
+			    done < .$TBName-metadata
+
+			    # Build Zenity arguments for filtering
+			    filter_col=$(zenity --list --title="Filter by Column" --radiolist \
+				--text="Choose a column to filter:" \
+				--column="Select" \
+				--column="Column Name" \
+				--cancel-label="Show All" \
+				TRUE "${columns[0]}" \
+				$(for col in "${columns[@]:1}"; do echo "FALSE $col"; done))
+
+			    zenity_exit_code=$?
+			    if [[ $zenity_exit_code == "0" ]]; then
+				# Get filter value
+				filter_value=$(zenity --entry --title="Filter Value" --text="Enter filter value for column '$filter_col':")
+
+				if [[ $? != 0 ]]; then
+				    continue
+				fi
+
+				# Validate filter value
+				colType=$(grep -w "$filter_col" .$TBName-metadata | cut -d: -f2)
+				if [[ $colType == "int" && ! $filter_value =~ ^[+-]?[0-9]+$ ]]; then
+				    zenity --error --text="Invalid filter value. Expected an integer."
+				    continue
+				elif [[ $colType == "string" && -z $filter_value ]]; then
+				    zenity --error --text="Invalid filter value. String cannot be empty."
+				    continue
+				fi
+
+				# Fetch filtered rows
+				filtered_rows=$(awk -F: -v col="$filter_col" -v val="$filter_value" '
+				    BEGIN {IGNORECASE = 1;}
+				    {
+				        for (i = 1; i <= NF; i++) {
+				            if ($i == val) {
+				                print $0;
+				                break;
+				            }
+				        }
+				    }
+				' "$TBName")
+
+				if [[ -z $filtered_rows ]]; then
+				    zenity --info --text="No matching records found."
+				else
+				    zenity --info --text="Matching records:\n$filtered_rows"
+				fi
+			    else
+				# Show all rows if no filter
+				all_rows=$(cat "$TBName")
+				if [[ -z $all_rows ]]; then
+				    zenity --info --text="No data in the table."
+				else
+				    zenity --info --text="All records:\n$all_rows"
+				fi
+			    fi
+			fi
+		    fi
+		    ;;
+
+
 		esac
 	else
 		zenity --question --title="Exit Confirmation" --text="Are you sure you want to back to the main menu?"
