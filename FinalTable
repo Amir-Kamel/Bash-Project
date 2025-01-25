@@ -249,155 +249,365 @@ while true; do
 			fi
 		;;
 		"Select From Table") # Select From Table
-				tables=$(ls -1 | grep -v "^\.")
-				if [[ -z $tables ]]; then
-					zenity --info --text="No tables found."
-				else
-					# Get files into an array (excludes hidden files)
-					mapfile -t tables_array < <(find . -maxdepth 1 -type f -printf '%f\n' | grep -v "^\.")
-					# Build Zenity arguments with radio buttons (mark the first item as selected)
-					array_length=${#tables_array[@]}
-					zenity_args=()
-					for ((index=0; index < array_length; index++))
-					do
-						if [[ $index -eq 0 ]]; then
-							zenity_args+=(TRUE "${tables_array[index]}")  # First item selected by default
-						else
-							zenity_args+=(FALSE "${tables_array[index]}")  # Others unselected
+			tables=$(ls -1 | grep -v "^\.")
+			if [[ -z $tables ]]; then
+				zenity --info --text="No tables found."
+			else
+				# Get files into an array (excludes hidden files)
+				mapfile -t tables_array < <(find . -maxdepth 1 -type f -printf '%f\n' | grep -v "^\.")
+				# Build Zenity arguments with radio buttons (mark the first item as selected)
+				array_length=${#tables_array[@]}
+				zenity_args=()
+				for ((index=0; index < array_length; index++))
+				do
+					if [[ $index -eq 0 ]]; then
+						zenity_args+=(TRUE "${tables_array[index]}")  # First item selected by default
+					else
+						zenity_args+=(FALSE "${tables_array[index]}")  # Others unselected
+					fi
+				done
+				while true
+				do
+					# Show the radio button dialog
+					TBName=$(zenity --list --title="Insert into Table" --radiolist \
+						--text="Choose a table:" \
+						--column="Select" \
+						--column="Table Name" \
+						--cancel-label="Back to Table Operation Menu" \
+						"${zenity_args[@]}")
+
+					zenity_exit_code=$?
+					if [[ $zenity_exit_code == "0" ]]; then  # Outer if (table selection)
+						# Check metadata exists
+						if [[ ! -f .$TBName-metadata ]]; then
+							zenity --error --text="Metadata file for table '$TBName' not found."
+							continue
 						fi
-					done
-					while true
-					do
-						# Show the radio button dialog
-						TBName=$(zenity --list --title="Insert into Table" --radiolist \
-							--text="Choose a table:" \
+
+						# Extract column names
+						columns=()
+						while IFS=":" read -r colName colType colAttr; do
+							columns+=("$colName")
+						done < .$TBName-metadata
+
+						# Build Zenity arguments for filtering
+						filter_col=$(zenity --list --title="Filter by Column" --radiolist \
+							--text="Choose a column to filter:" \
 							--column="Select" \
-							--column="Table Name" \
-							--cancel-label="Back to Table Operation Menu" \
-							"${zenity_args[@]}")
+							--column="Column Name" \
+							TRUE "Show All" \
+							$(for col in "${columns[@]}"; do echo "FALSE $col"; done))
 
 						zenity_exit_code=$?
-						if [[ $zenity_exit_code == "0" ]]; then  # Outer if (table selection)
-							# Check metadata exists
-							if [[ ! -f .$TBName-metadata ]]; then
-								zenity --error --text="Metadata file for table '$TBName' not found."
-								continue
-							fi
+						if [[ $zenity_exit_code == "0" ]]; then  # Inner if (filter selection)
+							case $filter_col in
+								"Show All")
+									# Build Zenity table arguments for all data
+									zenity_table_args=()
+									for col in "${columns[@]}"; do
+										zenity_table_args+=(--column "$col")
+									done
 
-							# Extract column names
-							columns=()
-							while IFS=":" read -r colName colType colAttr; do
-								columns+=("$colName")
-							done < .$TBName-metadata
+									# Add all rows to the arguments
+									# Read and unescape data
+									while IFS= read -r line; do
+										IFS=':' read -ra fields <<< "$line"
 
-							# Build Zenity arguments for filtering
-							filter_col=$(zenity --list --title="Filter by Column" --radiolist \
-								--text="Choose a column to filter:" \
-								--column="Select" \
-								--column="Column Name" \
-								TRUE "Show All" \
-								$(for col in "${columns[@]}"; do echo "FALSE $col"; done))
+										# Unescape spaces in each field
+										unescaped_fields=()
+										for field in "${fields[@]}"; do
+											unescaped_field="${field//\\/ }"
+											unescaped_fields+=("$unescaped_field")
+										done
+										zenity_table_args+=("${unescaped_fields[@]}")
+									done < "$TBName"
+									
 
-							zenity_exit_code=$?
-							if [[ $zenity_exit_code == "0" ]]; then  # Inner if (filter selection)
-								case $filter_col in
-									"Show All")
-										# Build Zenity table arguments for all data
+									if [[ ${#zenity_table_args[@]} -gt ${#columns[@]} ]]; then
+										zenity --list --title="All Records in $TBName" \
+												--width=800 --height=400 \
+												"${zenity_table_args[@]}"
+									else
+										zenity --info --text="All records:\n$all_rows"
+									fi
+								;;
+								*)
+									# Get filter value
+									filter_value=$(zenity --entry --title="Filter Value" --text="Enter filter value for column '$filter_col':")
+									if [[ $? != 0 ]]; then
+										continue
+									fi
+
+									# Validate filter value
+									colType=$(grep -w "$filter_col" .$TBName-metadata | cut -d: -f2)
+									if [[ $colType == "int" && ! $filter_value =~ ^[+-]?[0-9]+$ ]]; then
+										zenity --error --text="Invalid filter value. Expected an integer."
+										continue
+									elif [[ $colType == "string" && -z $filter_value ]]; then
+										zenity --error --text="Invalid filter value. String cannot be empty."
+										continue
+									fi
+									
+									
+
+									# Fetch filtered rows (fixed to use column index)
+									col_index=1
+									while IFS=":" read -r name type attr; do
+										if [[ "$name" == "$filter_col" ]]; then
+											break
+										fi
+										((col_index++))
+									done < .$TBName-metadata
+									
+									# Escape spaces in filter value for comparison
+									filter_value="${filter_value// /\\ }"
+
+									filtered_rows=$(awk -F: -v col_idx="$col_index" -v val="$filter_value" '
+										$col_idx == val {print $0}
+									' "$TBName")
+
+									if [[ -z $filtered_rows ]]; then
+										zenity --info --text="No matching records found."
+									else
+										# Build Zenity table with unescaped data
 										zenity_table_args=()
 										for col in "${columns[@]}"; do
 											zenity_table_args+=(--column "$col")
 										done
 
-										# Add all rows to the arguments
-										# Read and unescape data
 										while IFS= read -r line; do
 											IFS=':' read -ra fields <<< "$line"
-
-											# Unescape spaces in each field
 											unescaped_fields=()
 											for field in "${fields[@]}"; do
 												unescaped_field="${field//\\/ }"
 												unescaped_fields+=("$unescaped_field")
 											done
 											zenity_table_args+=("${unescaped_fields[@]}")
-										done < "$TBName"
-										
+										done <<< "$filtered_rows"
 
-										if [[ ${#zenity_table_args[@]} -gt ${#columns[@]} ]]; then
-											zenity --list --title="All Records in $TBName" \
-										    		--width=800 --height=400 \
-										    		"${zenity_table_args[@]}"
-										else
-											zenity --info --text="All records:\n$all_rows"
-										fi
-									;;
-									*)
-										# Get filter value
-										filter_value=$(zenity --entry --title="Filter Value" --text="Enter filter value for column '$filter_col':")
-										if [[ $? != 0 ]]; then
-											continue
-										fi
+										zenity --list --title="Filtered Records in $TBName" \
+											--width=800 --height=400 \
+											"${zenity_table_args[@]}"
+									fi
+								;;
+							esac
+						fi  # Closes inner if (filter selection)
+					else  # Else for outer if (table selection)
+						break
+					fi  # Closes outer if (table selection)
+				done
+			fi
+		;;
+		"Delete From Table") # Delete From Table
+			tables=$(ls -1 | grep -v "^\.")
+			if [[ -z $tables ]]; then
+				zenity --info --text="No tables found."
+			else
+				mapfile -t tables_array < <(find . -maxdepth 1 -type f -printf '%f\n' | grep -v "^\.")
+				array_length=${#tables_array[@]}
+				zenity_args=()
+				for ((index=0; index < array_length; index++)); do
+					if [[ $index -eq 0 ]]; then
+						zenity_args+=(TRUE "${tables_array[index]}")
+					else
+						zenity_args+=(FALSE "${tables_array[index]}")
+					fi
+				done
 
-										# Validate filter value
-										colType=$(grep -w "$filter_col" .$TBName-metadata | cut -d: -f2)
-										if [[ $colType == "int" && ! $filter_value =~ ^[+-]?[0-9]+$ ]]; then
-											zenity --error --text="Invalid filter value. Expected an integer."
-											continue
-										elif [[ $colType == "string" && -z $filter_value ]]; then
-											zenity --error --text="Invalid filter value. String cannot be empty."
-											continue
-										fi
-										
-										
+				TBName=$(zenity --list --title="Delete From Table" --radiolist \
+					--text="Choose a table:" \
+					--column="Select" \
+					--column="Table Name" \
+					--cancel-label="Back to Table Operation Menu" \
+					"${zenity_args[@]}")
 
-										# Fetch filtered rows (fixed to use column index)
-										col_index=1
-										while IFS=":" read -r name type attr; do
-											if [[ "$name" == "$filter_col" ]]; then
-												break
-											fi
-											((col_index++))
-										done < .$TBName-metadata
-										
-										# Escape spaces in filter value for comparison
-										filter_value="${filter_value// /\\ }"
+				if [[ $? == "0" ]]; then
+					if [[ ! -f .$TBName-metadata ]]; then
+						zenity --error --text="Metadata file for table '$TBName' not found."
+						continue
+					fi
 
-										filtered_rows=$(awk -F: -v col_idx="$col_index" -v val="$filter_value" '
-											$col_idx == val {print $0}
-										' "$TBName")
-
-										if [[ -z $filtered_rows ]]; then
-											zenity --info --text="No matching records found."
-										else
-											# Build Zenity table with unescaped data
-											zenity_table_args=()
-											for col in "${columns[@]}"; do
-												zenity_table_args+=(--column "$col")
-											done
-
-											while IFS= read -r line; do
-												IFS=':' read -ra fields <<< "$line"
-												unescaped_fields=()
-												for field in "${fields[@]}"; do
-													unescaped_field="${field//\\/ }"
-													unescaped_fields+=("$unescaped_field")
-												done
-												zenity_table_args+=("${unescaped_fields[@]}")
-											done <<< "$filtered_rows"
-
-											zenity --list --title="Filtered Records in $TBName" \
-												--width=800 --height=400 \
-												"${zenity_table_args[@]}"
-										fi
-									;;
-								esac
-							fi  # Closes inner if (filter selection)
-						else  # Else for outer if (table selection)
+					# Get primary key column
+					pk_col=""
+					while IFS=":" read -r colName colType colAttr; do
+						if [[ $colAttr == "pk" ]]; then
+							pk_col="$colName"
 							break
-						fi  # Closes outer if (table selection)
-					done
+						fi
+					done < .$TBName-metadata
+
+					if [[ -z $pk_col ]]; then
+						zenity --error --text="No primary key defined for table '$TBName'."
+						continue
+					fi
+
+					# Get primary key value to delete
+					pk_value=$(zenity --entry --title="Delete Row" --text="Enter primary key value ($pk_col) to delete:")
+					if [[ $? != "0" ]]; then
+						continue
+					fi
+
+					# Escape spaces in pk_value for exact match
+					pk_value_escaped="${pk_value// /\\ }"
+
+					# Find and delete the row
+					temp_file=$(mktemp)
+					awk -F: -v pk="$pk_value_escaped" -v pk_idx=1 '
+						BEGIN {OFS=":"}
+						{
+							if ($pk_idx != pk) {
+								print $0
+							}
+						}
+					' "$TBName" > "$temp_file"
+
+					# Check if a row was deleted
+					original_lines=$(wc -l < "$TBName")
+					new_lines=$(wc -l < "$temp_file")
+					if [[ $original_lines -eq $new_lines ]]; then
+						zenity --info --text="No rows found with $pk_col = '$pk_value'."
+						rm "$temp_file"
+					else
+						mv "$temp_file" "$TBName"
+						zenity --info --text="Row with $pk_col = '$pk_value' deleted successfully."
+					fi
 				fi
-		    ;;
+			fi
+		;;
+
+		"Update Table") # Update Table
+		    tables=$(ls -1 | grep -v "^\.")
+		    if [[ -z $tables ]]; then
+		        zenity --info --text="No tables found."
+		    else
+		        mapfile -t tables_array < <(find . -maxdepth 1 -type f -printf '%f\n' | grep -v "^\.")
+		        array_length=${#tables_array[@]}
+		        zenity_args=()
+		        for ((index=0; index < array_length; index++)); do
+		            if [[ $index -eq 0 ]]; then
+		                zenity_args+=(TRUE "${tables_array[index]}")
+		            else
+		                zenity_args+=(FALSE "${tables_array[index]}")
+		            fi
+		        done
+
+		        TBName=$(zenity --list --title="Update Table" --radiolist \
+		            --text="Choose a table:" \
+		            --column="Select" \
+		            --column="Table Name" \
+		            --cancel-label="Back to Table Operation Menu" \
+		            "${zenity_args[@]}")
+
+		        if [[ $? == "0" ]]; then
+		            if [[ ! -f .$TBName-metadata ]]; then
+		                zenity --error --text="Metadata file for table '$TBName' not found."
+		                continue
+		            fi
+
+		            # Get primary key column
+		            pk_col=""
+		            while IFS=":" read -r colName colType colAttr; do
+		                if [[ $colAttr == "pk" ]]; then
+		                    pk_col="$colName"
+		                    break
+		                fi
+		            done < .$TBName-metadata
+
+		            if [[ -z $pk_col ]]; then
+		                zenity --error --text="No primary key defined for table '$TBName'."
+		                continue
+		            fi
+
+		            # Get primary key value to update
+		            pk_value=$(zenity --entry --title="Update Row" --text="Enter primary key value ($pk_col) to update:")
+		            if [[ $? != "0" ]]; then
+		                continue
+		            fi
+
+		            # Escape spaces for exact match
+		            pk_value_escaped="${pk_value// /\\ }"
+
+		            # Check if row exists
+		            if ! grep -q -w "$pk_value_escaped" "$TBName"; then
+		                zenity --error --text="No row found with $pk_col = '$pk_value'."
+		                continue
+		            fi
+
+		            # Get column to update
+		            columns=()
+		            while IFS=":" read -r colName colType colAttr; do
+		                columns+=("$colName")
+		            done < .$TBName-metadata
+
+		            update_col=$(zenity --list --title="Select Column to Update" --radiolist \
+		                --text="Choose a column:" \
+		                --column="Select" \
+		                --column="Column Name" \
+		                $(for col in "${columns[@]}"; do echo "FALSE $col"; done))
+
+		            if [[ $? != "0" || -z $update_col ]]; then
+		                continue
+		            fi
+
+		            # Get new value
+		            new_value=$(zenity --entry --title="New Value" --text="Enter new value for '$update_col':")
+		            if [[ $? != "0" ]]; then
+		                continue
+		            fi
+
+		            # Validate data type
+		            colType=$(grep -w "$update_col" .$TBName-metadata | cut -d: -f2)
+		            if [[ $colType == "int" && ! $new_value =~ ^[+-]?[0-9]+$ ]]; then
+		                zenity --error --text="Invalid value. Expected an integer."
+		                continue
+		            elif [[ $colType == "string" && -z $new_value ]]; then
+		                zenity --error --text="Invalid value. String cannot be empty."
+		                continue
+		            fi
+
+		            # Escape spaces in new value
+		            new_value_escaped="${new_value// /\\ }"
+
+		            # Check PK uniqueness if updating PK
+		            if [[ $update_col == "$pk_col" ]]; then
+		                if grep -q -w "$new_value_escaped" "$TBName"; then
+		                    zenity --error --text="Primary key '$new_value' already exists."
+		                    continue
+		                fi
+		            fi
+
+		            # Update the row
+		            temp_file=$(mktemp)
+		            awk -F: -v pk="$pk_value_escaped" -v pk_idx=1 -v col="$update_col" -v new_val="$new_value_escaped" '
+		                BEGIN {OFS=":"; found=0}
+		                {
+		                    if ($pk_idx == pk) {
+		                        for (i=1; i<=NF; i++) {
+		                            if ($i == $i && i == col_idx) {
+		                                $i = new_val
+		                                found=1
+		                            }
+		                        }
+		                    }
+		                    print $0
+		                }
+		                END {
+		                    if (found == 0) {
+		                        exit 1
+		                    }
+		                }
+		            ' col_idx=$(grep -n "$update_col" .$TBName-metadata | cut -d: -f1) "$TBName" > "$temp_file"
+
+		            if [[ $? == "0" ]]; then
+		                mv "$temp_file" "$TBName"
+		                zenity --info --text="Row updated successfully."
+		            else
+		                zenity --error --text="Update failed."
+		                rm "$temp_file"
+		            fi
+		        fi
+		    fi
+		;;
 
 		esac
 	else
