@@ -1,7 +1,10 @@
 #!/usr/bin/bash
 shopt -s extglob
 
-# Save directory path
+# Save directory path 
+# change base directory as you like 
+# based on user directory 
+# this path is the path to the script were user store the downloaded script 
 BASE_DIR="$HOME/Desktop/Full_Stack_Python/Bash_Project/Bash-Project"
 
 # Path to the FinalTable script
@@ -26,6 +29,8 @@ do
 	FALSE "List Databases" \
 	FALSE "Connect To Database" \
 	FALSE "Drop Database"  --width=700 --height=500)
+	
+
 
 	case $choice in
 	"Create Database") # Create database
@@ -108,7 +113,7 @@ do
 				# Source the table operations script
 				if [[ -f $FINAL_TABLE_SCRIPT ]]
 				then
-					source "$FINAL_TABLE_SCRIPT" #to execute it in the same shell 
+					source "$FINAL_TABLE_SCRIPT" #to execute it in the same shell /sub shell
 				else
 					zenity --error --text="Error: FinalTable script not found at $FINAL_TABLE_SCRIPT"
 				fi
@@ -165,16 +170,17 @@ do
 						zenity --notification --text="Database '$DBName' dropped successfully."
 						break
 					fi
-				else
-					break
-				fi
+			else
+				break
+			fi
 			fi
 		done
 		;;
 	
-	*) # In case user click on cancel or close button 
+	*) # In case user click on cancel or close (x) button 
 		zenity --question --title="Exit Confirmation" --text="Are you sure you want to exit the program?"
 		user_answer=$?
+		
 		if [[ $user_answer == "0" ]]
 		then
 			zenity --notification --text="The program has been exited successfully!"

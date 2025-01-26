@@ -67,7 +67,12 @@ while true; do
 				for ((i = 1; i <= colNum; i++)); do
 					while true
 					do
-						colName=$(zenity --entry --text="Enter column name $i:")
+						colName=$(zenity --entry --text="Enter column name $i:" )
+						if [[ $? == "1" ]]
+						then 
+							zenity --error --text="you have to enter a name for this column"
+							continue
+						fi	
 						if [[ ! $colName =~ ^[a-zA-Z][a-zA-Z0-9_]*[a-zA-Z0-9]$ ]]
 						then
 							zenity --error --text="Invalid column name. Must start with a letter, can contain underscores, and cannot end with an underscore."
@@ -106,7 +111,7 @@ while true; do
 					fi
 				done
 				# Force primary key selection if none was chosen
-				if [[ $flag -eq 0 ]]; then
+				if [[ $flag -eq 0 && $chooseTBName == "1" ]]; then
 					# Read existing columns from metadata
 					columns=()
 					while IFS=":" read -r colName _ _; do
@@ -252,13 +257,13 @@ while true; do
 						while true; do
 							value=$(zenity --entry --title="Insert into Table" --text="Enter value for '$colName' ($colType):")
 							if [[ $? != 0 ]]; then
-								break 2  # If the user cancels the input, exit the loop.
+								break   # If the user cancels the input, exit the loop.
 							fi
 							
 							# Escape spaces in the value
 							value="${value// /\\}"  # Replace all spaces with "\"
 
-							if [[ $colType == "int" && ! $value =~ ^[+-]?[0-9]+$ ]]; then
+							if [[ $colType == "int" && ! $value =~ ^[0-9]*$ ]]; then
 								zenity --error --text="Invalid value for '$colName'. Expected an integer."
 								continue
 							elif [[ $colType == "string" && -z $value ]]; then
@@ -359,13 +364,11 @@ while true; do
 									done < "$TBName"
 									
 
-									if [[ ${#zenity_table_args[@]} -gt ${#columns[@]} ]]; then
+									
+
 										zenity --list --title="All Records in $TBName" \
 												--width=800 --height=400 \
 												"${zenity_table_args[@]}"
-									else
-										zenity --info --text="All records:\n$all_rows"
-									fi
 								;;
 								*)
 									# Get filter value
@@ -376,7 +379,7 @@ while true; do
 
 									# Validate filter value
 									colType=$(grep -w "$filter_col" .$TBName-metadata | cut -d: -f2)
-									if [[ $colType == "int" && ! $filter_value =~ ^[+-]?[0-9]+$ ]]; then
+									if [[ $colType == "int" && ! $filter_value =~ ^[0-9]+$ ]]; then
 										zenity --error --text="Invalid filter value. Expected an integer."
 										continue
 									elif [[ $colType == "string" && -z $filter_value ]]; then
@@ -396,7 +399,7 @@ while true; do
 									done < .$TBName-metadata
 									
 									# Escape spaces in filter value for comparison
-									filter_value="${filter_value// /\\ }"
+									filter_value="${filter_value// /\\}"
 
 									filtered_rows=$(awk -F: -v col_idx="$col_index" -v val="$filter_value" '
 										$col_idx == val {print $0}
