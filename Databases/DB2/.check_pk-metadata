@@ -1,0 +1,4 @@
+id:int:pk
+fname:string
+lname:string
+salary:int
